@@ -174,10 +174,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div>
 <script>
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-// Remplace par ton Worker après déploiement :
-// const PROXY = 'https://worldcup2026-proxy.TON-SOUS-DOMAINE.workers.dev';
-// Fallback direct (CORS limité mais fonctionne depuis un navigateur) :
-const PROXY = 'https://worldcup2026-proxy.widehem-olivier.workers.dev';
+// Source principale : API publique ESPN (officielle, sans clé, CORS OK)
+const ESPN = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260719&limit=300';
 
 // Intervalle de refresh : 60s hors match, 30s pendant un match en direct
 const REFRESH_NORMAL = 60000;
@@ -308,7 +306,7 @@ const F = t => FLAGS[t] || '🏳️';
 const ALIAS = {
   'czechrepublic':'czechia','unitedstates':'usa','turkiye':'turkey',
   'cotedivoire':'ivorycoast','congodr':'drcongo','drc':'drcongo',
-  'democraticrepublicofcongo':'drcongo','capoverde':'capeverde',
+  'democraticrepublicofcongo':'drcongo','capoverde':'capeverde','caboverde':'capeverde',
   'koreaprepublic':'southkorea','korearepublic':'southkorea','irir':'iran'
 };
 function fuzzy(a, b) {
@@ -368,21 +366,10 @@ async function fetchAll() {
   setApiStatus('loading');
 
   try {
-    // On interroge /games et /groups en parallèle
-    const [gamesRes, groupsRes] = await Promise.all([
-      fetch(`${PROXY}/games`),
-      fetch(`${PROXY}/groups`),
-    ]);
-
-    if (gamesRes.ok) {
-      const games = await gamesRes.json();
-      processGames(games);
-    }
-    if (groupsRes.ok) {
-      const groups = await groupsRes.json();
-      processGroups(groups);
-    }
-
+    const r = await fetch(ESPN);
+    if (!r.ok) throw new Error('ESPN ' + r.status);
+    const data = await r.json();
+    processESPN(data);
     setApiStatus('ok');
   } catch (e) {
     // Fallback openfootball
@@ -426,7 +413,7 @@ function setApiStatus(s) {
   if (!dot || !lbl) return;
   const map = {
     loading:  ['#BA7517','Chargement…'],
-    ok:       ['#3b9e3b','Live · CF Worker ✓'],
+    ok:       ['#3b9e3b','Live · ESPN ✓'],
     fallback: ['#BA7517','openfootball (J-1)'],
     err:      ['#e24b4a','Hors ligne'],
   };
@@ -435,69 +422,62 @@ function setApiStatus(s) {
   lbl.textContent = text;
 }
 
-// ─── TRAITEMENT DONNÉES worldcup26.ir ─────────────────────────────────────────
-function processGames(data) {
-  // L'API retourne un tableau de matchs
-  const games = Array.isArray(data) ? data : (data.games || data.matches || []);
+// ─── TRAITEMENT DONNÉES ESPN ──────────────────────────────────────────────────
+// Structure : { events: [ { competitions: [ { status:{type:{state,detail}, displayClock},
+//               competitors: [ {homeAway, score, team:{displayName}} ] } ] } ] }
+function findGroupOfTeam(name) {
+  for (const [g, teams] of Object.entries(GRP)) {
+    if (teams.some(t => fuzzy(t, name))) return g;
+  }
+  return null;
+}
+
+function processESPN(data) {
+  const events = data?.events || [];
+  if (!events.length) return;
   resetStandings();
   live = {};
 
-  games.forEach(g => {
-    const grpRaw = g.group || g.stage || '';
-    const grpMatch = String(grpRaw).match(/([A-L])/i);
-    const grp = grpMatch ? grpMatch[1].toUpperCase() : null;
-    if (!grp) return;
+  events.forEach(ev => {
+    const comp = ev.competitions?.[0];
+    if (!comp) return;
+    const homeC = comp.competitors?.find(c => c.homeAway === 'home');
+    const awayC = comp.competitors?.find(c => c.homeAway === 'away');
+    if (!homeC || !awayC) return;
 
-    const home = g.home_team?.name || g.homeTeam || g.home || '';
-    const away = g.away_team?.name || g.awayTeam || g.away || '';
-    const hs = g.home_score ?? g.homeScore ?? g.home_goals ?? null;
-    const as = g.away_score ?? g.awayScore ?? g.away_goals ?? null;
-    // finished peut être bool, string 'TRUE'/'FALSE', ou int 1/0 selon l'API
-    const finished = g.finished === true || String(g.finished).toUpperCase() === 'TRUE' || g.finished === 1;
-    const inPlay   = !finished && g.time_elapsed && g.time_elapsed !== '0' && g.time_elapsed !== 0;
-    const status   = g.status ? g.status : finished ? 'FT' : inPlay ? '1H' : 'NS';
+    const home = homeC.team?.displayName || '';
+    const away = awayC.team?.displayName || '';
+    const state = comp.status?.type?.state || 'pre';     // pre | in | post
+    const detail = comp.status?.type?.detail || '';
+    const clock = comp.status?.displayClock || '';
+
+    // Groupe déduit des équipes (l'API ne le fournit pas toujours)
+    const grp = findGroupOfTeam(home) || findGroupOfTeam(away);
+    if (!grp) return; // match à élimination directe ou équipe inconnue
 
     const sm = findStaticMatch(grp, home, away);
-    if (sm) {
-      live[sm.id] = {
-        hs: (finished || inPlay) ? Number(hs) : null,
-        as: (finished || inPlay) ? Number(as) : null,
-        status,
-        minute: g.minute || g.time_elapsed || null,
-      };
-      if (finished && hs !== null) {
-        updateStandings(grp, sm.home, sm.away, Number(hs), Number(as), sm.id);
-      }
+    if (!sm) return;
+
+    if (state === 'pre') {
+      live[sm.id] = {hs: null, as: null, status: 'NS', minute: null};
+      return;
     }
-  });
 
-  // Buteurs éventuels
-  if (data.top_scorers || data.scorers) {
-    scorers = (data.top_scorers || data.scorers || []).slice(0, 10);
-  }
-}
+    const hs = parseInt(homeC.score, 10);
+    const as = parseInt(awayC.score, 10);
+    if (isNaN(hs) || isNaN(as)) return;
 
-function processGroups(data) {
-  // Si l'API fournit directement les classements, on les utilise
-  const groups = Array.isArray(data) ? data : (data.groups || []);
-  groups.forEach(g => {
-    const grpMatch = (g.name || g.group || '').match(/([A-L])/i);
-    const grp = grpMatch ? grpMatch[1].toUpperCase() : null;
-    if (!grp || !standings[grp]) return;
-    const teams = g.teams || g.standings || [];
-    teams.forEach((t, i) => {
-      const name = t.team?.name || t.name || '';
-      const s = standings[grp].find(x => fuzzy(x.name, name));
-      if (!s) return;
-      s.pts  = t.points     ?? t.pts   ?? s.pts;
-      s.pj   = t.played     ?? t.pj    ?? s.pj;
-      s.v    = t.won        ?? t.v     ?? s.v;
-      s.n    = t.drawn      ?? t.n     ?? s.n;
-      s.d    = t.lost       ?? t.d     ?? s.d;
-      s.bp   = t.goals_for  ?? t.bp    ?? s.bp;
-      s.bc   = t.goals_against ?? t.bc ?? s.bc;
-      s.diff = t.goal_diff  ?? t.diff  ?? (s.bp - s.bc);
-    });
+    if (state === 'post') {
+      live[sm.id] = {hs, as, status: 'FT', minute: null};
+      updateStandings(grp, sm.home, sm.away, hs, as, sm.id);
+    } else { // in
+      const isHT = /halftime/i.test(detail);
+      live[sm.id] = {
+        hs, as,
+        status: isHT ? 'HT' : 'LIVE',
+        minute: clock ? clock.replace("'", '') : null,
+      };
+    }
   });
 }
 
