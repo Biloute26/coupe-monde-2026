@@ -333,31 +333,40 @@ const ALIAS = {
   'democraticrepublicofcongo':'drcongo','capoverde':'capeverde','caboverde':'capeverde',
   'koreaprepublic':'southkorea','korearepublic':'southkorea','irir':'iran'
 };
-function fuzzy(a, b) {
-  const n = s => {
-    let x = s.toLowerCase().replace(/[^a-z]/g,'');
-    return ALIAS[x] || x;
-  };
-  return n(a).includes(n(b)) || n(b).includes(n(a));
+// Normalise un nom d'équipe en clé canonique (gère accents + alias)
+function teamKey(s) {
+  let x = (s || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // retire accents
+    .replace(/[^a-z]/g, '');
+  return ALIAS[x] || x;
 }
+// Égalité STRICTE entre deux noms d'équipe (plus de includes() permissif)
+function sameTeam(a, b) {
+  return teamKey(a) === teamKey(b);
+}
+// fuzzy conservé pour compat éventuelle, mais strict désormais
+function fuzzy(a, b) { return sameTeam(a, b); }
 
-function findStaticMatch(grp, home, away, date) {
+// Identifie LE match statique : les DEUX équipes doivent correspondre.
+// Tolère l'inversion d'ordre (ESPN peut intervertir home/away).
+function findStaticMatch(grp, home, away) {
   return STATIC_MATCHES.find(m =>
-    m.grp === grp && fuzzy(m.home, home) && fuzzy(m.away, away)
-  ) || STATIC_MATCHES.find(m =>
-    m.grp === grp && (fuzzy(m.home, home) || fuzzy(m.away, away))
-  );
+    m.grp === grp &&
+    ((sameTeam(m.home, home) && sameTeam(m.away, away)) ||
+     (sameTeam(m.home, away) && sameTeam(m.away, home)))
+  ) || null;
 }
 
 function findTeamInGroup(grp, name) {
-  return standings[grp]?.find(t => fuzzy(t.name, name));
+  return standings[grp]?.find(t => sameTeam(t.name, name));
 }
 
+// hs/as sont TOUJOURS dans l'ordre (home statique, away statique) du match identifié.
 function updateStandings(grp, home, away, hs, as, key) {
   const h = findTeamInGroup(grp, home);
   const a = findTeamInGroup(grp, away);
   if (!h || !a || h === a) return;
-  if (h.seen.has(key)) return;
+  if (h.seen.has(key) || a.seen.has(key)) return;
   h.seen.add(key); a.seen.add(key);
   h.pj++; a.pj++;
   h.bp += hs; h.bc += as; h.diff = h.bp - h.bc;
@@ -491,13 +500,18 @@ function processESPN(data) {
     const as = parseInt(awayC.score, 10);
     if (isNaN(hs) || isNaN(as)) return;
 
+    // ESPN peut donner les équipes dans un ordre différent du calendrier statique.
+    // On réaligne les scores sur l'ordre (sm.home, sm.away).
+    let HS = hs, AS = as;
+    if (!sameTeam(sm.home, home)) { HS = as; AS = hs; }
+
     if (state === 'post') {
-      live[sm.id] = {hs, as, status: 'FT', minute: null};
-      updateStandings(grp, sm.home, sm.away, hs, as, sm.id);
+      live[sm.id] = {hs: HS, as: AS, status: 'FT', minute: null};
+      updateStandings(grp, sm.home, sm.away, HS, AS, sm.id);
     } else { // in
       const isHT = /halftime/i.test(detail);
       live[sm.id] = {
-        hs, as,
+        hs: HS, as: AS,
         status: isHT ? 'HT' : 'LIVE',
         minute: clock ? clock.replace("'", '') : null,
       };
