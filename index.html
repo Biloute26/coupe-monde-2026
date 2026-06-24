@@ -97,6 +97,31 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .s-goals span{font-size:11px;color:#aaa;font-weight:400}
 .no-data{text-align:center;padding:24px;color:#aaa;font-size:13px;background:#fff;border:1px solid #e0e3ea;border-radius:10px}
 
+.match-card{cursor:pointer}
+.match-card .tap-hint{grid-column:1/-1;text-align:center;font-size:10px;color:#b8bcc8;margin-top:2px;display:flex;align-items:center;justify-content:center;gap:4px}
+.modal-ov{position:fixed;inset:0;background:rgba(10,22,40,.55);backdrop-filter:blur(3px);display:none;align-items:flex-start;justify-content:center;z-index:1000;padding:24px 14px;overflow-y:auto}
+.modal-ov.open{display:flex}
+.modal{background:#fff;border-radius:16px;max-width:480px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25);animation:popin .2s ease;overflow:hidden}
+@keyframes popin{from{transform:translateY(12px) scale(.97);opacity:0}to{transform:none;opacity:1}}
+.modal-hd{background:#0A1628;color:#fff;padding:18px 20px;position:relative}
+.modal-x{position:absolute;top:12px;right:14px;background:rgba(255,255,255,.12);border:none;color:#fff;width:30px;height:30px;border-radius:50%;font-size:17px;cursor:pointer;line-height:1}
+.modal-x:hover{background:rgba(255,255,255,.25)}
+.modal-meta{font-size:11px;opacity:.6;margin-bottom:10px}
+.modal-teams{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px}
+.mt-side{display:flex;flex-direction:column;align-items:center;gap:5px;text-align:center}
+.mt-fl{font-size:30px}.mt-nm{font-size:13px;font-weight:600}
+.mt-score{font-size:30px;font-weight:800;letter-spacing:1px}
+.modal-st{text-align:center;margin-top:10px}
+.modal-bd{padding:18px 20px}
+.gl-section-t{font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.6px;margin:0 0 10px}
+.gl-list{display:flex;flex-direction:column;gap:7px}
+.gl-row{display:flex;align-items:center;gap:10px;padding:9px 12px;background:#f7f8fb;border-radius:9px;font-size:13px}
+.gl-row.away{flex-direction:row-reverse;text-align:right;background:#f2f6fb}
+.gl-min{font-weight:700;color:#0A1628;min-width:34px}
+.gl-row.away .gl-min{text-align:right}
+.gl-nm{flex:1;font-weight:500}
+.gl-icon{font-size:15px}
+.gl-empty{font-size:12.5px;color:#999;text-align:center;padding:14px 0;line-height:1.5}
 .spinner{display:inline-block;width:13px;height:13px;border:2px solid #dde;border-top-color:#378ADD;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
 @keyframes spin{to{transform:rotate(360deg)}}
 
@@ -172,10 +197,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   </div>
 
 </div>
+
+<div class="modal-ov" id="match-modal" onclick="if(event.target===this)closeMatch()">
+  <div class="modal" id="match-modal-box"></div>
+</div>
 <script>
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-// Source principale : API publique ESPN (officielle, sans clé, CORS OK)
-const ESPN = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260719&limit=300';
+// Remplace par ton Worker après déploiement :
+// const PROXY = 'https://worldcup2026-proxy.TON-SOUS-DOMAINE.workers.dev';
+// Fallback direct (CORS limité mais fonctionne depuis un navigateur) :
+const PROXY = 'https://worldcup2026-proxy.widehem-olivier.workers.dev';
 
 // Intervalle de refresh : 60s hors match, 30s pendant un match en direct
 const REFRESH_NORMAL = 60000;
@@ -203,14 +234,14 @@ const GRP = {
   A:['Mexico','South Africa','South Korea','Czechia'],
   B:['Canada','Switzerland','Qatar','Bosnia and Herzegovina'],
   C:['Brazil','Morocco','Scotland','Haiti'],
-  D:['USA','Australia','Paraguay','Türkiye'],
+  D:['United States','Australia','Paraguay','Türkiye'],
   E:['Germany','Ecuador','Ivory Coast','Curaçao'],
   F:['Netherlands','Japan','Tunisia','Sweden'],
   G:['Belgium','Iran','Egypt','New Zealand'],
   H:['Spain','Uruguay','Saudi Arabia','Cape Verde'],
   I:['France','Senegal','Norway','Iraq'],
   J:['Argentina','Austria','Algeria','Jordan'],
-  K:['Portugal','Colombia','Uzbekistan','DRC'],
+  K:['Portugal','Colombia','Uzbekistan','DR Congo'],
   L:['England','Croatia','Panama','Ghana']
 };
 
@@ -218,9 +249,9 @@ const STATIC_MATCHES = [
   {id:'m1',date:'2026-06-11',time:'19:00',grp:'A',home:'Mexico',away:'South Africa',venue:'Mexico City'},
   {id:'m2',date:'2026-06-12',time:'02:00',grp:'A',home:'South Korea',away:'Czechia',venue:'Guadalajara'},
   {id:'m3',date:'2026-06-12',time:'19:00',grp:'B',home:'Canada',away:'Bosnia and Herzegovina',venue:'Toronto'},
-  {id:'m4',date:'2026-06-13',time:'01:00',grp:'D',home:'USA',away:'Paraguay',venue:'Los Angeles'},
-  {id:'m5',date:'2026-06-13',time:'19:00',grp:'B',home:'Qatar',away:'Switzerland',venue:'San Francisco Bay Area'},
-  {id:'m6',date:'2026-06-13',time:'22:00',grp:'C',home:'Brazil',away:'Morocco',venue:'New York/New Jersey'},
+  {id:'m4',date:'2026-06-13',time:'01:00',grp:'D',home:'United States',away:'Paraguay',venue:'Los Angeles'},
+  {id:'m5',date:'2026-06-13',time:'19:00',grp:'B',home:'Qatar',away:'Switzerland',venue:'San Francisco'},
+  {id:'m6',date:'2026-06-13',time:'22:00',grp:'C',home:'Brazil',away:'Morocco',venue:'New York'},
   {id:'m7',date:'2026-06-14',time:'01:00',grp:'C',home:'Haiti',away:'Scotland',venue:'Boston'},
   {id:'m8',date:'2026-06-14',time:'04:00',grp:'D',home:'Australia',away:'Türkiye',venue:'Vancouver'},
   {id:'m9',date:'2026-06-14',time:'17:00',grp:'E',home:'Germany',away:'Curaçao',venue:'Houston'},
@@ -231,10 +262,10 @@ const STATIC_MATCHES = [
   {id:'m14',date:'2026-06-15',time:'19:00',grp:'G',home:'Belgium',away:'Egypt',venue:'Seattle'},
   {id:'m15',date:'2026-06-15',time:'22:00',grp:'H',home:'Saudi Arabia',away:'Uruguay',venue:'Miami'},
   {id:'m16',date:'2026-06-16',time:'01:00',grp:'G',home:'Iran',away:'New Zealand',venue:'Los Angeles'},
-  {id:'m17',date:'2026-06-16',time:'19:00',grp:'I',home:'France',away:'Senegal',venue:'New York/New Jersey'},
+  {id:'m17',date:'2026-06-16',time:'19:00',grp:'I',home:'France',away:'Senegal',venue:'New York'},
   {id:'m18',date:'2026-06-16',time:'22:00',grp:'I',home:'Iraq',away:'Norway',venue:'Boston'},
   {id:'m19',date:'2026-06-17',time:'01:00',grp:'J',home:'Argentina',away:'Algeria',venue:'Kansas City'},
-  {id:'m20',date:'2026-06-17',time:'04:00',grp:'J',home:'Austria',away:'Jordan',venue:'San Francisco Bay Area'},
+  {id:'m20',date:'2026-06-17',time:'04:00',grp:'J',home:'Austria',away:'Jordan',venue:'San Francisco'},
   {id:'m21',date:'2026-06-17',time:'17:00',grp:'K',home:'Portugal',away:'DR Congo',venue:'Houston'},
   {id:'m22',date:'2026-06-17',time:'20:00',grp:'L',home:'England',away:'Croatia',venue:'Dallas'},
   {id:'m23',date:'2026-06-17',time:'23:00',grp:'L',home:'Ghana',away:'Panama',venue:'Toronto'},
@@ -243,9 +274,9 @@ const STATIC_MATCHES = [
   {id:'m26',date:'2026-06-18',time:'19:00',grp:'B',home:'Switzerland',away:'Bosnia and Herzegovina',venue:'Los Angeles'},
   {id:'m27',date:'2026-06-18',time:'22:00',grp:'B',home:'Canada',away:'Qatar',venue:'Vancouver'},
   {id:'m28',date:'2026-06-19',time:'01:00',grp:'A',home:'Mexico',away:'South Korea',venue:'Guadalajara'},
-  {id:'m29',date:'2026-06-19',time:'19:00',grp:'D',home:'USA',away:'Australia',venue:'Seattle'},
+  {id:'m29',date:'2026-06-19',time:'19:00',grp:'D',home:'United States',away:'Australia',venue:'Seattle'},
   {id:'m30',date:'2026-06-19',time:'22:00',grp:'C',home:'Scotland',away:'Morocco',venue:'Boston'},
-  {id:'m31',date:'2026-06-20',time:'03:00',grp:'D',home:'Türkiye',away:'Paraguay',venue:'San Francisco Bay Area'},
+  {id:'m31',date:'2026-06-20',time:'03:00',grp:'D',home:'Türkiye',away:'Paraguay',venue:'San Francisco'},
   {id:'m32',date:'2026-06-20',time:'00:30',grp:'C',home:'Brazil',away:'Haiti',venue:'Philadelphia'},
   {id:'m33',date:'2026-06-20',time:'17:00',grp:'F',home:'Netherlands',away:'Sweden',venue:'Houston'},
   {id:'m34',date:'2026-06-20',time:'20:00',grp:'E',home:'Germany',away:'Ivory Coast',venue:'Toronto'},
@@ -257,8 +288,8 @@ const STATIC_MATCHES = [
   {id:'m40',date:'2026-06-22',time:'01:00',grp:'G',home:'New Zealand',away:'Egypt',venue:'Vancouver'},
   {id:'m41',date:'2026-06-22',time:'17:00',grp:'J',home:'Argentina',away:'Austria',venue:'Dallas'},
   {id:'m42',date:'2026-06-22',time:'21:00',grp:'I',home:'France',away:'Iraq',venue:'Philadelphia'},
-  {id:'m43',date:'2026-06-23',time:'00:00',grp:'I',home:'Norway',away:'Senegal',venue:'New York/New Jersey'},
-  {id:'m44',date:'2026-06-23',time:'03:00',grp:'J',home:'Jordan',away:'Algeria',venue:'San Francisco Bay Area'},
+  {id:'m43',date:'2026-06-23',time:'00:00',grp:'I',home:'Norway',away:'Senegal',venue:'New York'},
+  {id:'m44',date:'2026-06-23',time:'03:00',grp:'J',home:'Jordan',away:'Algeria',venue:'San Francisco'},
   {id:'m45',date:'2026-06-23',time:'17:00',grp:'K',home:'Portugal',away:'Uzbekistan',venue:'Houston'},
   {id:'m46',date:'2026-06-23',time:'20:00',grp:'L',home:'England',away:'Ghana',venue:'Boston'},
   {id:'m47',date:'2026-06-23',time:'23:00',grp:'L',home:'Panama',away:'Croatia',venue:'Toronto'},
@@ -270,23 +301,23 @@ const STATIC_MATCHES = [
   {id:'m53',date:'2026-06-25',time:'01:00',grp:'A',home:'Czechia',away:'Mexico',venue:'Mexico City'},
   {id:'m54',date:'2026-06-25',time:'01:00',grp:'A',home:'South Africa',away:'South Korea',venue:'Monterrey'},
   {id:'m55',date:'2026-06-25',time:'20:00',grp:'E',home:'Curaçao',away:'Ivory Coast',venue:'Philadelphia'},
-  {id:'m56',date:'2026-06-25',time:'20:00',grp:'E',home:'Ecuador',away:'Germany',venue:'New York/New Jersey'},
+  {id:'m56',date:'2026-06-25',time:'20:00',grp:'E',home:'Ecuador',away:'Germany',venue:'New York'},
   {id:'m57',date:'2026-06-25',time:'23:00',grp:'F',home:'Japan',away:'Sweden',venue:'Dallas'},
   {id:'m58',date:'2026-06-25',time:'23:00',grp:'F',home:'Tunisia',away:'Netherlands',venue:'Kansas City'},
-  {id:'m59',date:'2026-06-26',time:'02:00',grp:'D',home:'Türkiye',away:'USA',venue:'Los Angeles'},
-  {id:'m60',date:'2026-06-26',time:'02:00',grp:'D',home:'Paraguay',away:'Australia',venue:'San Francisco Bay Area'},
+  {id:'m59',date:'2026-06-26',time:'02:00',grp:'D',home:'Türkiye',away:'United States',venue:'Los Angeles'},
+  {id:'m60',date:'2026-06-26',time:'02:00',grp:'D',home:'Paraguay',away:'Australia',venue:'San Francisco'},
   {id:'m61',date:'2026-06-26',time:'19:00',grp:'I',home:'Norway',away:'France',venue:'Boston'},
   {id:'m62',date:'2026-06-26',time:'19:00',grp:'I',home:'Senegal',away:'Iraq',venue:'Toronto'},
   {id:'m63',date:'2026-06-27',time:'00:00',grp:'H',home:'Uruguay',away:'Spain',venue:'Guadalajara'},
   {id:'m64',date:'2026-06-27',time:'00:00',grp:'H',home:'Cape Verde',away:'Saudi Arabia',venue:'Houston'},
   {id:'m65',date:'2026-06-27',time:'03:00',grp:'G',home:'Egypt',away:'Iran',venue:'Seattle'},
   {id:'m66',date:'2026-06-27',time:'03:00',grp:'G',home:'New Zealand',away:'Belgium',venue:'Vancouver'},
-  {id:'m67',date:'2026-06-27',time:'21:00',grp:'L',home:'Panama',away:'England',venue:'New York/New Jersey'},
+  {id:'m67',date:'2026-06-27',time:'21:00',grp:'L',home:'Panama',away:'England',venue:'New York'},
   {id:'m68',date:'2026-06-27',time:'21:00',grp:'L',home:'Croatia',away:'Ghana',venue:'Philadelphia'},
   {id:'m69',date:'2026-06-27',time:'23:30',grp:'K',home:'Colombia',away:'Portugal',venue:'Miami'},
   {id:'m70',date:'2026-06-27',time:'23:30',grp:'K',home:'DR Congo',away:'Uzbekistan',venue:'Atlanta'},
   {id:'m71',date:'2026-06-28',time:'02:00',grp:'J',home:'Algeria',away:'Austria',venue:'Kansas City'},
-  {id:'m72',date:'2026-06-28',time:'02:00',grp:'J',home:'Jordan',away:'Argentina',venue:'Dallas'},
+  {id:'m72',date:'2026-06-28',time:'02:00',grp:'J',home:'Jordan',away:'Argentina',venue:'Dallas'}
 ];
 
 const KO = [
@@ -314,7 +345,9 @@ const KO = [
 // ─── ÉTAT ─────────────────────────────────────────────────────────────────────
 let live = {};      // {matchId: {hs, as, status, minute}}
 let standings = {}; // classements calculés
-let scorers = [];   // buteurs depuis l'API
+let scorers = [];   // classement buteurs affiché (API prioritaire, sinon recalcul local)
+let apiScorers = []; // classement officiel fourni par l'API (persistant entre refresh)
+let matchScorers = {}; // {matchId: [{name, team:'home'|'away', minute, og, pen}]}
 let timer = null;
 
 function resetStandings() {
@@ -330,43 +363,64 @@ const F = t => FLAGS[t] || '🏳️';
 const ALIAS = {
   'czechrepublic':'czechia','unitedstates':'usa','turkiye':'turkey',
   'cotedivoire':'ivorycoast','congodr':'drcongo','drc':'drcongo',
-  'democraticrepublicofcongo':'drcongo','capoverde':'capeverde','caboverde':'capeverde',
+  'democraticrepublicofcongo':'drcongo','capoverde':'capeverde',
   'koreaprepublic':'southkorea','korearepublic':'southkorea','irir':'iran'
 };
-// Normalise un nom d'équipe en clé canonique (gère accents + alias)
-function teamKey(s) {
-  let x = (s || '').toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // retire accents
-    .replace(/[^a-z]/g, '');
-  return ALIAS[x] || x;
+function fuzzy(a, b) {
+  const n = s => {
+    let x = s.toLowerCase().replace(/[^a-z]/g,'');
+    return ALIAS[x] || x;
+  };
+  return n(a).includes(n(b)) || n(b).includes(n(a));
 }
-// Égalité STRICTE entre deux noms d'équipe (plus de includes() permissif)
-function sameTeam(a, b) {
-  return teamKey(a) === teamKey(b);
-}
-// fuzzy conservé pour compat éventuelle, mais strict désormais
-function fuzzy(a, b) { return sameTeam(a, b); }
 
-// Identifie LE match statique : les DEUX équipes doivent correspondre.
-// Tolère l'inversion d'ordre (ESPN peut intervertir home/away).
-function findStaticMatch(grp, home, away) {
-  return STATIC_MATCHES.find(m =>
-    m.grp === grp &&
-    ((sameTeam(m.home, home) && sameTeam(m.away, away)) ||
-     (sameTeam(m.home, away) && sameTeam(m.away, home)))
-  ) || null;
+// L'API worldcup26.ir identifie les équipes par id numérique (pas par nom) dans
+// /get/games. Cette table id→nom (depuis /get/teams) permet de résoudre les ids
+// en noms avant l'appariement. Les ids 4,6,16,23,35,42 sont des barragistes (TBD).
+const API_TEAM_ID = {
+  1:'Mexico', 2:'South Africa', 3:'South Korea', 4:'UEFA Path D Winner',
+  5:'Canada', 6:'UEFA Path A Winner', 7:'Qatar', 8:'Switzerland',
+  9:'Brazil', 10:'Morocco', 11:'Haiti', 12:'Scotland',
+  13:'United States', 14:'Paraguay', 15:'Australia', 16:'UEFA Path C Winner',
+  17:'Germany', 18:'Curaçao', 19:'Ivory Coast', 20:'Ecuador',
+  21:'Netherlands', 22:'Japan', 23:'UEFA Path B Winner', 24:'Tunisia',
+  25:'Belgium', 26:'Egypt', 27:'Iran', 28:'New Zealand',
+  29:'Spain', 30:'Cape Verde', 31:'Saudi Arabia', 32:'Uruguay',
+  33:'France', 34:'Senegal', 35:'IC Path 2 Winner', 36:'Norway',
+  37:'Argentina', 38:'Algeria', 39:'Austria', 40:'Jordan',
+  41:'Portugal', 42:'IC Path 1 Winner', 43:'Uzbekistan', 44:'Colombia',
+  45:'England', 46:'Croatia', 47:'Ghana', 48:'Panama'
+};
+const apiTeamName = id => API_TEAM_ID[Number(id)] || '';
+
+// Retourne {match, swap} : swap=true si l'ordre API est inversé p/r au match statique.
+// Matching STRICT : les DEUX équipes doivent correspondre. Pas de fallback à une seule
+// équipe (source d'appariements faux et d'inversions home/away).
+function findStaticMatch(grp, home, away, date) {
+  if (!home || !away) return null;
+  // Ordre direct : API.home == static.home ET API.away == static.away
+  let m = STATIC_MATCHES.find(x =>
+    x.grp === grp && fuzzy(x.home, home) && fuzzy(x.away, away)
+  );
+  if (m) return { match: m, swap: false };
+  // Ordre inversé : API.home == static.away ET API.away == static.home
+  m = STATIC_MATCHES.find(x =>
+    x.grp === grp && fuzzy(x.home, away) && fuzzy(x.away, home)
+  );
+  if (m) return { match: m, swap: true };
+  // Aucun appariement fiable : on n'invente rien.
+  return null;
 }
 
 function findTeamInGroup(grp, name) {
-  return standings[grp]?.find(t => sameTeam(t.name, name));
+  return standings[grp]?.find(t => fuzzy(t.name, name));
 }
 
-// hs/as sont TOUJOURS dans l'ordre (home statique, away statique) du match identifié.
 function updateStandings(grp, home, away, hs, as, key) {
   const h = findTeamInGroup(grp, home);
   const a = findTeamInGroup(grp, away);
   if (!h || !a || h === a) return;
-  if (h.seen.has(key) || a.seen.has(key)) return;
+  if (h.seen.has(key)) return;
   h.seen.add(key); a.seen.add(key);
   h.pj++; a.pj++;
   h.bp += hs; h.bc += as; h.diff = h.bp - h.bc;
@@ -379,6 +433,26 @@ function updateStandings(grp, home, away, hs, as, key) {
 function fmtDate(d) {
   return new Date(d + 'T12:00:00Z').toLocaleDateString('fr-FR',
     {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+}
+
+// Convertit l'heure UTC d'un match (date + "HH:MM" UTC) en heure de Paris.
+// toLocaleTimeString avec timeZone gère automatiquement l'heure d'été/hiver.
+function heureParis(date, timeUTC) {
+  if (!date || !timeUTC || !/^\d{2}:\d{2}$/.test(timeUTC)) return timeUTC || '';
+  const d = new Date(`${date}T${timeUTC}:00Z`);
+  if (isNaN(d)) return timeUTC;
+  return d.toLocaleTimeString('fr-FR',
+    {hour:'2-digit', minute:'2-digit', timeZone:'Europe/Paris'});
+}
+
+// Renvoie la date Paris (YYYY-MM-DD) correspondant à un coup d'envoi UTC.
+// Un match à 23:00 UTC tombe le lendemain à Paris (01:00) : on le classe au bon jour.
+function dateParis(date, timeUTC) {
+  if (!date) return date;
+  const t = /^\d{2}:\d{2}$/.test(timeUTC) ? timeUTC : '12:00';
+  const d = new Date(`${date}T${t}:00Z`);
+  if (isNaN(d)) return date;
+  return d.toLocaleDateString('en-CA', {timeZone:'Europe/Paris'}); // format YYYY-MM-DD
 }
 
 function statusLabel(st) {
@@ -399,10 +473,21 @@ async function fetchAll() {
   setApiStatus('loading');
 
   try {
-    const r = await fetch(ESPN + '&_=' + Date.now());
-    if (!r.ok) throw new Error('ESPN ' + r.status);
-    const data = await r.json();
-    processESPN(data);
+    // On interroge /games et /groups en parallèle
+    const [gamesRes, groupsRes] = await Promise.all([
+      fetch(`${PROXY}/games`),
+      fetch(`${PROXY}/groups`),
+    ]);
+
+    if (gamesRes.ok) {
+      const games = await gamesRes.json();
+      processGames(games);
+    }
+    if (groupsRes.ok) {
+      const groups = await groupsRes.json();
+      processGroups(groups);
+    }
+
     setApiStatus('ok');
   } catch (e) {
     // Fallback openfootball
@@ -446,7 +531,7 @@ function setApiStatus(s) {
   if (!dot || !lbl) return;
   const map = {
     loading:  ['#BA7517','Chargement…'],
-    ok:       ['#3b9e3b','Live · ESPN ✓'],
+    ok:       ['#3b9e3b','Live · CF Worker ✓'],
     fallback: ['#BA7517','openfootball (J-1)'],
     err:      ['#e24b4a','Hors ligne'],
   };
@@ -455,67 +540,174 @@ function setApiStatus(s) {
   lbl.textContent = text;
 }
 
-// ─── TRAITEMENT DONNÉES ESPN ──────────────────────────────────────────────────
-// Structure : { events: [ { competitions: [ { status:{type:{state,detail}, displayClock},
-//               competitors: [ {homeAway, score, team:{displayName}} ] } ] } ] }
-function findGroupOfTeam(name) {
-  for (const [g, teams] of Object.entries(GRP)) {
-    if (teams.some(t => fuzzy(t, name))) return g;
+// ─── TRAITEMENT DONNÉES worldcup26.ir ─────────────────────────────────────────
+function processGames(data) {
+  // L'API retourne un tableau de matchs
+  const games = Array.isArray(data) ? data : (data.games || data.matches || []);
+  resetStandings();
+  live = {};
+  matchScorers = {};
+
+  games.forEach(g => {
+    const grpRaw = g.group || g.stage || '';
+    const grpMatch = String(grpRaw).match(/(?:group|groupe|grp|gr)\s*([A-L])\b/i) || String(grpRaw).match(/\b([A-L])\b/i);
+    const grp = grpMatch ? grpMatch[1].toUpperCase() : null;
+    if (!grp) return;
+
+    // L'API renvoie home_team_id / away_team_id (ids numériques), pas les noms.
+    // On résout via la table API_TEAM_ID ; fallback sur d'éventuels champs nom.
+    const home = apiTeamName(g.home_team_id ?? g.homeTeamId)
+               || g.home_team?.name || g.homeTeam || g.home || '';
+    const away = apiTeamName(g.away_team_id ?? g.awayTeamId)
+               || g.away_team?.name || g.awayTeam || g.away || '';
+    let hs = g.home_score ?? g.homeScore ?? g.home_goals ?? null;
+    let as = g.away_score ?? g.awayScore ?? g.away_goals ?? null;
+    // finished : l'API renvoie la string "TRUE"/"FALSE".
+    const stRaw = String(g.status || '').toUpperCase();
+    const elapsed = String(g.time_elapsed ?? '').toLowerCase();
+    const finished = g.finished === true || String(g.finished).toUpperCase() === 'TRUE'
+                  || g.finished === 1 || ['FT','AET','PEN','FINISHED'].includes(stRaw);
+    // En cours : time_elapsed est une minute (ni "notstarted" ni vide ni "0").
+    const inPlay = !finished && (
+                   ['1H','2H','HT','ET','BT','LIVE','IN_PLAY','PAUSED'].includes(stRaw)
+                   || (elapsed && elapsed !== 'notstarted' && elapsed !== '0' && elapsed !== 'null'));
+    const status = finished ? 'FT' : inPlay ? (stRaw && stRaw !== 'IN_PLAY' ? stRaw : '1H') : 'NS';
+
+    const found = findStaticMatch(grp, home, away);
+    if (found) {
+      const sm = found.match;
+      // Si l'ordre API est inversé p/r au match statique, on permute les scores
+      // pour qu'ils correspondent TOUJOURS à sm.home / sm.away.
+      if (found.swap) { const t = hs; hs = as; as = t; }
+      // Un score n'est affiché QUE si le match est terminé ou en cours.
+      const showScore = (finished || inPlay) && hs !== null && as !== null;
+      live[sm.id] = {
+        hs: showScore ? Number(hs) : null,
+        as: showScore ? Number(as) : null,
+        status,
+        minute: (inPlay && elapsed && elapsed !== 'notstarted') ? (g.minute || g.time_elapsed) : null,
+      };
+      // Buteurs : on passe les noms dans l'ordre STATIQUE (sm.home/sm.away) pour que
+      // sideOf retourne le bon côté, et le flag swap pour réorienter les fallbacks.
+      const gls = extractGoals(g, sm.home, sm.away, found.swap);
+      if (gls.length) matchScorers[sm.id] = gls;
+      if (finished && hs !== null && as !== null) {
+        updateStandings(grp, sm.home, sm.away, Number(hs), Number(as), sm.id);
+      }
+    }
+  });
+
+  // Buteurs : on privilégie le classement officiel de l'API (top_scorers / scorers)
+  // s'il existe — c'est lui qui contient les totaux complets (ex. Messi en tête).
+  // Sinon, on recalcule à partir du détail des buteurs match par match.
+  const apiTop = data.top_scorers || data.scorers || data.topScorers || data.top_scorer || null;
+  if (Array.isArray(apiTop) && apiTop.length) {
+    apiScorers = apiTop.slice(0, 30).map(s => ({
+      name: s.player?.name || s.name || s.full_name || s.player || '—',
+      team: s.team?.name || s.team || s.country || '',
+      goals: s.goals ?? s.goal_count ?? s.goals_scored ?? s.total ?? 0,
+      pens: s.penalties ?? s.pens ?? 0,
+    })).filter(s => s.name && s.name !== '—');
   }
+  rebuildScorers();
+}
+
+// Normalise les noms d'équipe API → nom interne (home/away du match statique)
+function sideOf(scorerTeam, homeName, awayName) {
+  if (!scorerTeam) return null;
+  if (fuzzy(scorerTeam, homeName)) return 'home';
+  if (fuzzy(scorerTeam, awayName)) return 'away';
   return null;
 }
 
-function processESPN(data) {
-  const events = data?.events || [];
-  if (!events.length) return;
-  resetStandings();
-  live = {};
+// Extrait la liste des buteurs d'un match, quel que soit le format de l'API.
+// homeName/awayName sont dans l'ordre STATIQUE. swap=true => l'ordre API est inversé,
+// donc les côtés bruts ('home'/'away' fournis par l'API) doivent être permutés.
+function extractGoals(g, homeName, awayName, swap) {
+  const out = [];
+  const flip = s => swap ? (s === 'home' ? 'away' : s === 'away' ? 'home' : s) : s;
+  const push = (name, side, minute, og, pen) => {
+    if (!name) return;
+    out.push({ name: String(name).trim(), team: side, minute: minute != null ? String(minute).replace(/['′]/g,'') : null, og: !!og, pen: !!pen });
+  };
 
-  events.forEach(ev => {
-    const comp = ev.competitions?.[0];
-    if (!comp) return;
-    const homeC = comp.competitors?.find(c => c.homeAway === 'home');
-    const awayC = comp.competitors?.find(c => c.homeAway === 'away');
-    if (!homeC || !awayC) return;
+  // Format 1 : tableau d'événements (events / timeline / incidents)
+  const evs = g.events || g.timeline || g.incidents || [];
+  if (Array.isArray(evs) && evs.length) {
+    evs.forEach(e => {
+      const type = String(e.type || e.event || e.detail || '').toLowerCase();
+      if (!type.includes('goal') && !type.includes('but')) return;
+      const og = type.includes('own');
+      const pen = type.includes('pen');
+      const name = e.player?.name || e.player || e.scorer?.name || e.scorer || e.name;
+      const teamName = e.team?.name || e.team || e.side;
+      // sideOf compare aux noms statiques → déjà correct, pas de flip nécessaire.
+      let side = sideOf(teamName, homeName, awayName);
+      // Fallback sur le champ brut e.side (orientation API) → à permuter si swap.
+      if (!side && (e.side === 'home' || e.side === 'away')) side = flip(e.side);
+      push(name, side, e.minute ?? e.time ?? e.elapsed, og, pen);
+    });
+  }
 
-    const home = homeC.team?.displayName || '';
-    const away = awayC.team?.displayName || '';
-    const state = comp.status?.type?.state || 'pre';     // pre | in | post
-    const detail = comp.status?.type?.detail || '';
-    const clock = comp.status?.displayClock || '';
+  // Format 2 : champs séparés home_scorers / away_scorers (orientation API → flip).
+  const grab = (arr, side) => {
+    (arr || []).forEach(s => {
+      const name = typeof s === 'string' ? s.replace(/\s*\d+\s*['′]?(\s*\(.*\))?\s*$/, '').trim() : (s.player?.name || s.name || s.player);
+      const minute = typeof s === 'string' ? (s.match(/(\d+)\s*['′]?/) || [])[1] : (s.minute ?? s.time);
+      push(name, side, minute, /\bog\b|own/i.test(JSON.stringify(s)), /pen/i.test(JSON.stringify(s)));
+    });
+  };
+  if (!out.length) {
+    grab(g.home_scorers || g.homeScorers || g.goals?.home, flip('home'));
+    grab(g.away_scorers || g.awayScorers || g.goals?.away, flip('away'));
+  }
 
-    // Groupe déduit des équipes (l'API ne le fournit pas toujours)
-    const grp = findGroupOfTeam(home) || findGroupOfTeam(away);
-    if (!grp) return; // match à élimination directe ou équipe inconnue
+  return out;
+}
 
-    const sm = findStaticMatch(grp, home, away);
+// Construit le classement affiché : priorité au classement officiel de l'API
+// (apiScorers), sinon recalcul à partir du détail des buteurs match par match.
+function rebuildScorers() {
+  if (apiScorers.length) { scorers = apiScorers.slice(0, 20); return; }
+  const tally = {};
+  Object.entries(matchScorers).forEach(([mid, gls]) => {
+    const sm = STATIC_MATCHES.find(m => m.id === mid);
     if (!sm) return;
+    gls.forEach(gl => {
+      if (gl.og) return; // les CSC ne comptent pas pour le buteur
+      const teamName = gl.team === 'home' ? sm.home : gl.team === 'away' ? sm.away : '';
+      const key = gl.name.toLowerCase() + '|' + teamName.toLowerCase();
+      if (!tally[key]) tally[key] = { name: gl.name, team: teamName, goals: 0, pens: 0 };
+      tally[key].goals++;
+      if (gl.pen) tally[key].pens++;
+    });
+  });
+  scorers = Object.values(tally)
+    .sort((a, b) => b.goals - a.goals || a.name.localeCompare(b.name))
+    .slice(0, 20);
+}
 
-    if (state === 'pre') {
-      live[sm.id] = {hs: null, as: null, status: 'NS', minute: null};
-      return;
-    }
-
-    const hs = parseInt(homeC.score, 10);
-    const as = parseInt(awayC.score, 10);
-    if (isNaN(hs) || isNaN(as)) return;
-
-    // ESPN peut donner les équipes dans un ordre différent du calendrier statique.
-    // On réaligne les scores sur l'ordre (sm.home, sm.away).
-    let HS = hs, AS = as;
-    if (!sameTeam(sm.home, home)) { HS = as; AS = hs; }
-
-    if (state === 'post') {
-      live[sm.id] = {hs: HS, as: AS, status: 'FT', minute: null};
-      updateStandings(grp, sm.home, sm.away, HS, AS, sm.id);
-    } else { // in
-      const isHT = /halftime/i.test(detail);
-      live[sm.id] = {
-        hs: HS, as: AS,
-        status: isHT ? 'HT' : 'LIVE',
-        minute: clock ? clock.replace("'", '') : null,
-      };
-    }
+function processGroups(data) {
+  // Si l'API fournit directement les classements, on les utilise
+  const groups = Array.isArray(data) ? data : (data.groups || []);
+  groups.forEach(g => {
+    const grpMatch = (g.name || g.group || '').match(/(?:group|groupe|grp|gr)\s*([A-L])\b/i) || (g.name || g.group || '').match(/\b([A-L])\b/i);
+    const grp = grpMatch ? grpMatch[1].toUpperCase() : null;
+    if (!grp || !standings[grp]) return;
+    const teams = g.teams || g.standings || [];
+    teams.forEach((t, i) => {
+      const name = t.team?.name || t.name || '';
+      const s = standings[grp].find(x => fuzzy(x.name, name));
+      if (!s) return;
+      s.pts  = t.points     ?? t.pts   ?? s.pts;
+      s.pj   = t.played     ?? t.pj    ?? s.pj;
+      s.v    = t.won        ?? t.v     ?? s.v;
+      s.n    = t.drawn      ?? t.n     ?? s.n;
+      s.d    = t.lost       ?? t.d     ?? s.d;
+      s.bp   = t.goals_for  ?? t.bp    ?? s.bp;
+      s.bc   = t.goals_against ?? t.bc ?? s.bc;
+      s.diff = t.goal_diff  ?? t.diff  ?? (s.bp - s.bc);
+    });
   });
 }
 
@@ -536,6 +728,7 @@ function processOpenfootball(data) {
 
   resetStandings();
   live = {};
+  matchScorers = {};
   flat.forEach(m => {
     const gm = String(m.group || '').match(/([A-L])\b/i);
     const grp = gm ? gm[1].toUpperCase() : null;
@@ -558,7 +751,14 @@ function processOpenfootball(data) {
     if (!sm) return;
     live[sm.id] = {hs, as, status:'FT', minute:null};
     updateStandings(grp, sm.home, sm.away, hs, as, sm.id);
+
+    // openfootball : goals1/goals2 = [{name, minute, owngoal?, penalty?}]
+    const gls = [];
+    (m.goals1 || []).forEach(x => gls.push({name:x.name||x.player, team:'home', minute:x.minute, og:x.owngoal||x.og, pen:x.penalty||x.pen}));
+    (m.goals2 || []).forEach(x => gls.push({name:x.name||x.player, team:'away', minute:x.minute, og:x.owngoal||x.og, pen:x.penalty||x.pen}));
+    if (gls.length) matchScorers[sm.id] = gls;
   });
+  rebuildScorers();
 }
 
 // ─── RENDU GROUPES ────────────────────────────────────────────────────────────
@@ -623,7 +823,13 @@ function renderMatches() {
   }
 
   const byDate = {};
-  filtered.forEach(m => { (byDate[m.date] = byDate[m.date] || []).push(m); });
+  filtered.forEach(m => {
+    const dp = dateParis(m.date, m.time);
+    (byDate[dp] = byDate[dp] || []).push(m);
+  });
+  // Tri des matchs d'un même jour par heure de Paris (chronologique).
+  Object.values(byDate).forEach(ms => ms.sort((a,b) =>
+    heureParis(a.date, a.time).localeCompare(heureParis(b.date, b.time))));
 
   mc.innerHTML = Object.entries(byDate).sort().map(([date, ms]) => {
     const cards = ms.map(m => {
@@ -631,21 +837,30 @@ function renderMatches() {
       const hs = ld.hs !== undefined ? ld.hs : null;
       const as = ld.as !== undefined ? ld.as : null;
       const st = ld.status || 'NS';
-      const {cls, txt} = statusLabel(st);
-      const isLive = ['1H','2H','HT','ET','BT','LIVE'].includes(st);
-      return `<div class="match-card ${isLive ? 'live' : ''}">
+      // Garde-fou : un match "terminé" sans score remonté ne doit pas afficher
+      // "Terminé" (sinon affichage trompeur "- : -" en vert). On le repasse à venir.
+      const stSafe = (st === 'FT' && (hs === null || as === null)) ? 'NS' : st;
+      const {cls, txt} = statusLabel(stSafe);
+      const isLive = ['1H','2H','HT','ET','BT','LIVE'].includes(stSafe);
+      const hasGoals = (matchScorers[m.id] || []).length > 0;
+      const played = stSafe === 'FT' || isLive;
+      const hint = played
+        ? `<div class="tap-hint"><i class="ti ti-list-details"></i> ${hasGoals ? 'Voir les buteurs' : 'Détails du match'}</div>`
+        : `<div class="tap-hint"><i class="ti ti-clock"></i> ${heureParis(m.date, m.time)} · à venir</div>`;
+      return `<div class="match-card ${isLive ? 'live' : ''}" onclick="openMatch('${m.id}')">
         <div class="team-side">
           <div class="team-fn"><span class="tf">${F(m.home)}</span>${m.home}</div>
         </div>
         <div class="score-box">
           <div class="score">${hs !== null ? hs : '-'}&nbsp;:&nbsp;${as !== null ? as : '-'}</div>
           <div class="meta">Gr.${m.grp} · ${m.venue}</div>
-          <div class="meta">${m.time} UTC</div>
+          <div class="meta">${heureParis(m.date, m.time)}</div>
           <span class="st-badge ${cls}">${txt}${ld.minute ? ' ' + ld.minute + "'" : ''}</span>
         </div>
         <div class="team-side right">
           <div class="team-fn right">${m.away}<span class="tf">${F(m.away)}</span></div>
         </div>
+        ${hint}
       </div>`;
     }).join('');
     return `<div class="match-day-hdr">${fmtDate(date)}</div>${cards}`;
@@ -697,16 +912,74 @@ function renderStats() {
       : '<div class="no-data">Données buteurs non disponibles sur cette source.</div>';
     return;
   }
-  sl.innerHTML = scorers.map((s, i) => `
+  sl.innerHTML = scorers.map((s, i) => {
+    const nm = s.name || s.player?.name || '—';
+    const tm = s.team?.name || s.team || '';
+    const g  = s.goals != null ? s.goals : (s.goal_count || 0);
+    const pens = s.pens ? ` · ${s.pens} pen.` : '';
+    return `
     <div class="scorer-row">
       <div class="s-rank ${i < 3 ? 'gold' : ''}">${i + 1}</div>
       <div class="s-info">
-        <div class="s-name">${s.player?.name || s.name || '—'}</div>
-        <div class="s-team">${F(s.team?.name || s.team || '')} ${s.team?.name || s.team || ''}</div>
+        <div class="s-name">${nm}</div>
+        <div class="s-team">${F(tm)} ${tm}${pens}</div>
       </div>
-      <div class="s-goals">${s.goals || s.goal_count || 0}<span> buts</span></div>
-    </div>`).join('');
+      <div class="s-goals">${g}<span> buts</span></div>
+    </div>`;
+  }).join('');
 }
+
+// ─── MODAL DÉTAIL MATCH ───────────────────────────────────────────────────────
+function openMatch(id) {
+  const m = STATIC_MATCHES.find(x => x.id === id);
+  if (!m) return;
+  const ld = live[id] || {};
+  const st = ld.status || 'NS';
+  const {cls, txt} = statusLabel(st);
+  const isLive = ['1H','2H','HT','ET','BT','LIVE'].includes(st);
+  const hs = ld.hs != null ? ld.hs : '-';
+  const as = ld.as != null ? ld.as : '-';
+  const played = st === 'FT' || isLive;
+
+  const gls = (matchScorers[id] || []).slice().sort((a,b) => (parseInt(a.minute)||999) - (parseInt(b.minute)||999));
+  const tag = gl => (gl.pen ? ' (pen.)' : '') + (gl.og ? ' (csc)' : '');
+  const homeRows = gls.filter(g => g.team === 'home').map(g =>
+    `<div class="gl-row"><span class="gl-icon">⚽</span><span class="gl-nm">${g.name}${tag(g)}</span><span class="gl-min">${g.minute ? g.minute + "'" : ''}</span></div>`).join('');
+  const awayRows = gls.filter(g => g.team === 'away').map(g =>
+    `<div class="gl-row away"><span class="gl-icon">⚽</span><span class="gl-nm">${g.name}${tag(g)}</span><span class="gl-min">${g.minute ? g.minute + "'" : ''}</span></div>`).join('');
+
+  let body;
+  if (!played) {
+    body = `<div class="gl-empty">Match à venir.<br>Coup d'envoi : ${fmtDate(m.date)} à ${heureParis(m.date, m.time)}.</div>`;
+  } else if (!gls.length) {
+    body = `<div class="gl-empty">${(hs===0&&as===0)?'Aucun but pour le moment (0-0).':'Buteurs non disponibles sur la source de données pour ce match.'}</div>`;
+  } else {
+    const col = (rows, name, flag) => `<div><div class="gl-section-t">${flag} ${name}</div><div class="gl-list">${rows || '<div class="gl-empty" style="padding:6px 0">—</div>'}</div></div>`;
+    body = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">${col(homeRows, m.home, F(m.home))}${col(awayRows, m.away, F(m.away))}</div>`;
+  }
+
+  document.getElementById('match-modal-box').innerHTML = `
+    <div class="modal-hd">
+      <button class="modal-x" onclick="closeMatch()">✕</button>
+      <div class="modal-meta">Groupe ${m.grp} · ${m.venue} · ${heureParis(m.date, m.time)}</div>
+      <div class="modal-teams">
+        <div class="mt-side"><div class="mt-fl">${F(m.home)}</div><div class="mt-nm">${m.home}</div></div>
+        <div class="mt-score">${hs} : ${as}</div>
+        <div class="mt-side"><div class="mt-fl">${F(m.away)}</div><div class="mt-nm">${m.away}</div></div>
+      </div>
+      <div class="modal-st"><span class="st-badge ${cls}">${txt}${ld.minute ? ' ' + ld.minute + "'" : ''}</span></div>
+    </div>
+    <div class="modal-bd">
+      <div class="gl-section-t" style="margin-bottom:12px">⚽ Buteurs</div>
+      ${body}
+    </div>`;
+  document.getElementById('match-modal').classList.add('open');
+}
+
+function closeMatch() {
+  document.getElementById('match-modal').classList.remove('open');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMatch(); });
 
 // ─── NAVIGATION ONGLETS ───────────────────────────────────────────────────────
 function switchTab(id) {
