@@ -668,7 +668,6 @@ function extractGoals(g, homeName, awayName, swap) {
 // Construit le classement affiché : priorité au classement officiel de l'API
 // (apiScorers), sinon recalcul à partir du détail des buteurs match par match.
 function rebuildScorers() {
-  if (apiScorers.length) { scorers = apiScorers.slice(0, 20); return; }
   const tally = {};
   Object.entries(matchScorers).forEach(([mid, gls]) => {
     const sm = STATIC_MATCHES.find(m => m.id === mid);
@@ -682,9 +681,20 @@ function rebuildScorers() {
       if (gl.pen) tally[key].pens++;
     });
   });
-  scorers = Object.values(tally)
-    .sort((a, b) => b.goals - a.goals || a.name.localeCompare(b.name))
-    .slice(0, 20);
+  const local = Object.values(tally);
+  // Le comptage local (détail but par but) fait FOI : il reflète exactement les
+  // matchs joués. On ne retombe sur le classement API (apiScorers) QUE s'il
+  // n'existe aucun but détecté localement (ex. tout début de compétition,
+  // ou source détaillée indisponible).
+  if (local.length) {
+    scorers = local
+      .sort((a, b) => b.goals - a.goals || a.name.localeCompare(b.name))
+      .slice(0, 20);
+  } else if (apiScorers.length) {
+    scorers = apiScorers.slice(0, 20);
+  } else {
+    scorers = [];
+  }
 }
 
 function processGroups(data) {
@@ -699,6 +709,11 @@ function processGroups(data) {
       const name = t.team?.name || t.name || '';
       const s = standings[grp].find(x => fuzzy(x.name, name));
       if (!s) return;
+      // Le calcul local (processGames → updateStandings) fait FOI : il est exact
+      // et déterministe. On ne complète avec /groups QUE les équipes pour
+      // lesquelles le local n'a encore enregistré aucun match (pj === 0),
+      // afin de ne jamais écraser des points correctement recalculés.
+      if (s.pj > 0) return;
       s.pts  = t.points     ?? t.pts   ?? s.pts;
       s.pj   = t.played     ?? t.pj    ?? s.pj;
       s.v    = t.won        ?? t.v     ?? s.v;
