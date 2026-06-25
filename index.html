@@ -686,6 +686,25 @@ function extractGoals(g, homeName, awayName, swap) {
 // (apiScorers), sinon recalcul à partir du détail des buteurs match par match.
 function rebuildScorers() {
   if (apiScorers.length) { scorers = apiScorers.slice(0, 20); return; }
+
+  // Clé d'agrégation tolérante aux variantes de nom : l'API écrit le même joueur
+  // tantôt "Kylian Mbappé", tantôt "K. Mbappé". On regroupe sur
+  // initiale-du-prénom + nom-de-famille (dernier mot), accents/casse ignorés,
+  // pour ne pas compter le même buteur deux fois.
+  const norm = s => s.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // retire accents
+    .replace(/[.]/g, ' ').replace(/\s+/g, ' ').trim();
+  const scorerKey = (name, team) => {
+    const parts = norm(name).split(' ').filter(Boolean);
+    if (!parts.length) return norm(name) + '|' + norm(team);
+    const last = parts[parts.length - 1];
+    const firstInit = parts.length > 1 ? parts[0][0] : '';
+    return firstInit + '|' + last + '|' + norm(team);
+  };
+  // Score de complétude pour choisir le libellé d'affichage le plus riche
+  // (on préfère "Kylian Mbappé" à "K. Mbappé").
+  const fullness = n => (n.includes('.') ? 0 : 1) * 100 + n.length;
+
   const tally = {};
   Object.entries(matchScorers).forEach(([mid, gls]) => {
     const sm = STATIC_MATCHES.find(m => m.id === mid);
@@ -693,8 +712,9 @@ function rebuildScorers() {
     gls.forEach(gl => {
       if (gl.og) return; // les CSC ne comptent pas pour le buteur
       const teamName = gl.team === 'home' ? sm.home : gl.team === 'away' ? sm.away : '';
-      const key = gl.name.toLowerCase() + '|' + teamName.toLowerCase();
+      const key = scorerKey(gl.name, teamName);
       if (!tally[key]) tally[key] = { name: gl.name, team: teamName, goals: 0, pens: 0 };
+      else if (fullness(gl.name) > fullness(tally[key].name)) tally[key].name = gl.name;
       tally[key].goals++;
       if (gl.pen) tally[key].pens++;
     });
@@ -705,25 +725,32 @@ function rebuildScorers() {
 }
 
 function processGroups(data) {
-  // Si l'API fournit directement les classements, on les utilise
+  // Le classement est recalculé de façon fiable depuis les scores des matchs
+  // (updateStandings). L'API /groups ne sert que de FALLBACK : on ne l'applique
+  // qu'aux équipes dont aucun match n'a encore alimenté le classement (pj===0),
+  // pour ne jamais écraser un calcul correct. Toutes les valeurs sont forcées
+  // en nombre (l'API renvoie parfois des strings comme "0").
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
   const groups = Array.isArray(data) ? data : (data.groups || []);
   groups.forEach(g => {
     const grpMatch = (g.name || g.group || '').match(/(?:group|groupe|grp|gr)\s*([A-L])\b/i) || (g.name || g.group || '').match(/\b([A-L])\b/i);
     const grp = grpMatch ? grpMatch[1].toUpperCase() : null;
     if (!grp || !standings[grp]) return;
     const teams = g.teams || g.standings || [];
-    teams.forEach((t, i) => {
+    teams.forEach((t) => {
       const name = t.team?.name || t.name || '';
       const s = standings[grp].find(x => fuzzy(x.name, name));
       if (!s) return;
-      s.pts  = t.points     ?? t.pts   ?? s.pts;
-      s.pj   = t.played     ?? t.pj    ?? s.pj;
-      s.v    = t.won        ?? t.v     ?? s.v;
-      s.n    = t.drawn      ?? t.n     ?? s.n;
-      s.d    = t.lost       ?? t.d     ?? s.d;
-      s.bp   = t.goals_for  ?? t.bp    ?? s.bp;
-      s.bc   = t.goals_against ?? t.bc ?? s.bc;
-      s.diff = t.goal_diff  ?? t.diff  ?? (s.bp - s.bc);
+      // Si des matchs ont déjà été comptés pour cette équipe, on garde le recalcul.
+      if (s.pj > 0) return;
+      s.pts  = num(t.points ?? t.pts);
+      s.pj   = num(t.played ?? t.pj);
+      s.v    = num(t.won ?? t.v);
+      s.n    = num(t.drawn ?? t.n);
+      s.d    = num(t.lost ?? t.d);
+      s.bp   = num(t.goals_for ?? t.bp);
+      s.bc   = num(t.goals_against ?? t.bc);
+      s.diff = (t.goal_diff != null) ? num(t.goal_diff) : (s.bp - s.bc);
     });
   });
 }
