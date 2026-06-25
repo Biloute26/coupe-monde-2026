@@ -363,7 +363,7 @@ const F = t => FLAGS[t] || '🏳️';
 const ALIAS = {
   'czechrepublic':'czechia','unitedstates':'usa','turkiye':'turkey',
   'cotedivoire':'ivorycoast','congodr':'drcongo','drc':'drcongo',
-  'democraticrepublicofcongo':'drcongo','capoverde':'capeverde',
+  'democraticrepublicofcongo':'drcongo','democraticrepublicofthecongo':'drcongo','capoverde':'capeverde',
   'koreaprepublic':'southkorea','korearepublic':'southkorea','irir':'iran'
 };
 function fuzzy(a, b) {
@@ -472,33 +472,35 @@ async function fetchAll() {
   if (spin) spin.style.display = 'inline-block';
   setApiStatus('loading');
 
+  let gamesOK = false;
+
+  // 1) /games — la source critique. Try indépendant : un échec sur /groups
+  //    ne doit pas faire passer toute l'appli "Hors ligne".
   try {
-    // On interroge /games et /groups en parallèle
-    const [gamesRes, groupsRes] = await Promise.all([
-      fetch(`${PROXY}/games`),
-      fetch(`${PROXY}/groups`),
-    ]);
-
-    if (gamesRes.ok) {
-      const games = await gamesRes.json();
-      processGames(games);
+    const r = await fetch(`${PROXY}/games`, {cache:'no-store'});
+    if (r.ok) {
+      const data = await r.json();
+      processGames(data);
+      gamesOK = true;
     }
-    if (groupsRes.ok) {
-      const groups = await groupsRes.json();
-      processGroups(groups);
-    }
+  } catch (e) { /* CORS ou réseau : on tentera le fallback plus bas */ }
 
-    setApiStatus('ok');
-  } catch (e) {
-    // Fallback openfootball
+  // 2) /groups — facultatif. Le classement est de toute façon recalculé
+  //    depuis les scores des matchs dans processGames.
+  try {
+    const r = await fetch(`${PROXY}/groups`, {cache:'no-store'});
+    if (r.ok) processGroups(await r.json());
+  } catch (e) { /* non bloquant */ }
+
+  // 3) Fallback openfootball uniquement si /games a échoué.
+  if (!gamesOK) {
     try {
-      const r = await fetch('https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json');
-      if (r.ok) {
-        const d = await r.json();
-        processOpenfootball(d);
-        setApiStatus('fallback');
-      } else { setApiStatus('err'); }
+      const r = await fetch('https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json', {cache:'no-store'});
+      if (r.ok) { processOpenfootball(await r.json()); setApiStatus('fallback'); }
+      else setApiStatus('err');
     } catch { setApiStatus('err'); }
+  } else {
+    setApiStatus('ok');
   }
 
   if (spin) spin.style.display = 'none';
@@ -506,17 +508,14 @@ async function fetchAll() {
   const lu = document.getElementById('lu');
   if (lu) lu.textContent = 'Mis à jour ' + now.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'});
 
-  // Badge EN DIRECT
   const badge = document.getElementById('live-badge');
   if (badge) badge.style.display = hasLiveMatches() ? 'block' : 'none';
 
-  // Re-render
   renderGroups();
   const active = document.querySelector('.section.active');
   if (active?.id === 'matchs') renderMatches();
   if (active?.id === 'stats')  renderStats();
 
-  // Ajuste l'intervalle selon matchs en direct
   scheduleNext();
 }
 
@@ -554,11 +553,11 @@ function processGames(data) {
     const grp = grpMatch ? grpMatch[1].toUpperCase() : null;
     if (!grp) return;
 
-    // L'API renvoie home_team_id / away_team_id (ids numériques), pas les noms.
-    // On résout via la table API_TEAM_ID ; fallback sur d'éventuels champs nom.
-    const home = apiTeamName(g.home_team_id ?? g.homeTeamId)
+    // L'API worldcup26.ir fournit directement les noms (home_team_name_en).
+    // On les utilise en priorité ; fallback sur la table d'ids puis autres champs.
+    const home = g.home_team_name_en || apiTeamName(g.home_team_id ?? g.homeTeamId)
                || g.home_team?.name || g.homeTeam || g.home || '';
-    const away = apiTeamName(g.away_team_id ?? g.awayTeamId)
+    const away = g.away_team_name_en || apiTeamName(g.away_team_id ?? g.awayTeamId)
                || g.away_team?.name || g.awayTeam || g.away || '';
     let hs = g.home_score ?? g.homeScore ?? g.home_goals ?? null;
     let as = g.away_score ?? g.awayScore ?? g.away_goals ?? null;
@@ -649,17 +648,35 @@ function extractGoals(g, homeName, awayName, swap) {
     });
   }
 
-  // Format 2 : champs séparés home_scorers / away_scorers (orientation API → flip).
-  const grab = (arr, side) => {
-    (arr || []).forEach(s => {
-      const name = typeof s === 'string' ? s.replace(/\s*\d+\s*['′]?(\s*\(.*\))?\s*$/, '').trim() : (s.player?.name || s.name || s.player);
-      const minute = typeof s === 'string' ? (s.match(/(\d+)\s*['′]?/) || [])[1] : (s.minute ?? s.time);
-      push(name, side, minute, /\bog\b|own/i.test(JSON.stringify(s)), /pen/i.test(JSON.stringify(s)));
+  // Format 2 : champs séparés home_scorers / away_scorers.
+  // worldcup26.ir les renvoie comme STRING façon "{\"H. Kane 12'(p)\",\"...\"}"
+  // (ou la string "null"), pas comme tableau. On parse en liste de noms.
+  const parseScorers = v => {
+    if (Array.isArray(v)) return v;
+    if (typeof v !== 'string') return [];
+    let s = v.trim();
+    if (!s || s === 'null' || s === '{}') return [];
+    s = s.replace(/^\{/, '').replace(/\}$/, '');
+    // Découpe UNIQUEMENT sur la virgule séparant deux entrées entre guillemets
+    // (",") — surtout pas sur les apostrophes de minute (ex. 9'). Gère aussi les
+    // guillemets typographiques " ".
+    const parts = s.split(/"\s*,\s*"|”\s*,\s*“|"\s*,\s*“|”\s*,\s*"/);
+    return parts.map(x => x.replace(/^[\s"“”]+|[\s"“”]+$/g, '').trim()).filter(Boolean);
+  };
+  const grab = (raw, side) => {
+    parseScorers(raw).forEach(s => {
+      const og  = /\(\s*og\s*\)/i.test(s);
+      const pen = /\(\s*p\s*\)|\(\s*pen/i.test(s);
+      const mMin = s.match(/(\d+(?:\+\d+)?)\s*['′]/);
+      const minute = mMin ? mMin[1] : null;
+      // Nom = tout avant la minute (premier groupe de chiffres suivi de ' ou ′).
+      const name = s.replace(/\s*\d+(?:\+\d+)?\s*['′].*$/, '').replace(/\s*\(.*\)\s*$/, '').trim();
+      push(name, side, minute, og, pen);
     });
   };
   if (!out.length) {
-    grab(g.home_scorers || g.homeScorers || g.goals?.home, flip('home'));
-    grab(g.away_scorers || g.awayScorers || g.goals?.away, flip('away'));
+    grab(g.home_scorers ?? g.homeScorers ?? g.goals?.home, flip('home'));
+    grab(g.away_scorers ?? g.awayScorers ?? g.goals?.away, flip('away'));
   }
 
   return out;
@@ -668,6 +685,7 @@ function extractGoals(g, homeName, awayName, swap) {
 // Construit le classement affiché : priorité au classement officiel de l'API
 // (apiScorers), sinon recalcul à partir du détail des buteurs match par match.
 function rebuildScorers() {
+  if (apiScorers.length) { scorers = apiScorers.slice(0, 20); return; }
   const tally = {};
   Object.entries(matchScorers).forEach(([mid, gls]) => {
     const sm = STATIC_MATCHES.find(m => m.id === mid);
@@ -681,20 +699,9 @@ function rebuildScorers() {
       if (gl.pen) tally[key].pens++;
     });
   });
-  const local = Object.values(tally);
-  // Le comptage local (détail but par but) fait FOI : il reflète exactement les
-  // matchs joués. On ne retombe sur le classement API (apiScorers) QUE s'il
-  // n'existe aucun but détecté localement (ex. tout début de compétition,
-  // ou source détaillée indisponible).
-  if (local.length) {
-    scorers = local
-      .sort((a, b) => b.goals - a.goals || a.name.localeCompare(b.name))
-      .slice(0, 20);
-  } else if (apiScorers.length) {
-    scorers = apiScorers.slice(0, 20);
-  } else {
-    scorers = [];
-  }
+  scorers = Object.values(tally)
+    .sort((a, b) => b.goals - a.goals || a.name.localeCompare(b.name))
+    .slice(0, 20);
 }
 
 function processGroups(data) {
@@ -709,11 +716,6 @@ function processGroups(data) {
       const name = t.team?.name || t.name || '';
       const s = standings[grp].find(x => fuzzy(x.name, name));
       if (!s) return;
-      // Le calcul local (processGames → updateStandings) fait FOI : il est exact
-      // et déterministe. On ne complète avec /groups QUE les équipes pour
-      // lesquelles le local n'a encore enregistré aucun match (pj === 0),
-      // afin de ne jamais écraser des points correctement recalculés.
-      if (s.pj > 0) return;
       s.pts  = t.points     ?? t.pts   ?? s.pts;
       s.pj   = t.played     ?? t.pj    ?? s.pj;
       s.v    = t.won        ?? t.v     ?? s.v;
