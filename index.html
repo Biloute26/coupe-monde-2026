@@ -368,7 +368,7 @@ const ALIAS = {
 };
 function fuzzy(a, b) {
   const n = s => {
-    let x = s.toLowerCase().replace(/[^a-z]/g,'');
+    let x = s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
     return ALIAS[x] || x;
   };
   return n(a).includes(n(b)) || n(b).includes(n(a));
