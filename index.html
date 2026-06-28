@@ -79,6 +79,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ko-col-title{font-size:11px;font-weight:700;color:#0A1628;text-align:center;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid #e0e3ea;text-transform:uppercase;letter-spacing:.5px}
 .ko-match{background:#fff;border:1px solid #e0e3ea;border-radius:8px;padding:7px 10px;margin-bottom:8px}
 .ko-team{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:11px;color:#444}
+.ko-team.ko-win{font-weight:700;color:#0A1628}
+.ko-team.ko-win .ko-score{color:#3b9e3b}
 .ko-score{font-size:12px;font-weight:700;color:#0A1628;min-width:14px;text-align:center}
 .ko-date{font-size:10px;color:#bbb;text-align:center;margin-top:4px;border-top:1px solid #f5f5f5;padding-top:3px}
 
@@ -323,27 +325,21 @@ const STATIC_MATCHES = [
   {id:'m72',date:'2026-06-28',time:'02:00',grp:'J',home:'Jordan',away:'Argentina',venue:'Dallas'}
 ];
 
-const KO = [
-  {name:'Huitièmes',dates:'28 juin–3 juil.',matches:[
-    {h:'1A',a:'3e C/D/F/G/H'},{h:'1C',a:'3e A/E/F/H/I'},
-    {h:'1B',a:'3e E/G/I/J/K'},{h:'1F',a:'3e A/B/C/D'},
-    {h:'1E',a:'3e C/D/F/G/H'},{h:'1D',a:'3e D/E/F/G/I'},
-    {h:'1G',a:'3e A/E/H/I/J'},{h:'1K',a:'3e D/E/I/J/L'},
-    {h:'1H',a:'3e A/B/E/F/G'},{h:'1I',a:'3e H/J/K/L'},
-    {h:'2B',a:'2F'},{h:'2A',a:'2C'},
-    {h:'2E',a:'2G'},{h:'2D',a:'2J'},
-    {h:'2H',a:'2L'},{h:'2K',a:'2I'},
-  ]},
-  {name:'Quarts',dates:'9–11 juil.',matches:[
-    {h:'W1',a:'W2'},{h:'W3',a:'W4'},{h:'W5',a:'W6'},{h:'W7',a:'W8'},
-    {h:'W9',a:'W10'},{h:'W11',a:'W12'},{h:'W13',a:'W14'},{h:'W15',a:'W16'},
-  ]},
-  {name:'Demies',dates:'14–15 juil.',matches:[
-    {h:'QF1',a:'QF2'},{h:'QF3',a:'QF4'},{h:'QF5',a:'QF6'},{h:'QF7',a:'QF8'},
-  ]},
-  {name:'Petite finale',dates:'18 juil.',matches:[{h:'3e A',a:'3e B'}]},
-  {name:'🏆 Finale',dates:'19 juil. · New York',matches:[{h:'SF1',a:'SF2'}]},
-];
+// Bracket à élimination directe (format 48 éq. : 16es → 8es → quarts → demies → 3e place → finale).
+// Construit dynamiquement depuis les données de matchs (openfootball), pas codé en dur :
+// les équipes apparaissent dès qu'elles sont qualifiées, sinon on garde le slot (3A/B/C, W74…).
+let koBracket = [];
+const KO_ROUND_FR = {
+  'Round of 32':       '16es de finale',
+  'Round of 16':       'Huitièmes',
+  'Quarter-final':     'Quarts',
+  'Semi-final':        'Demies',
+  'Match for third place': 'Petite finale',
+  'Final':             '🏆 Finale'
+};
+const KO_ROUND_ORDER = ['Round of 32','Round of 16','Quarter-final','Semi-final','Match for third place','Final'];
+
+
 
 // ─── ÉTAT ─────────────────────────────────────────────────────────────────────
 let live = {};      // {matchId: {hs, as, status, minute}}
@@ -499,11 +495,16 @@ async function fetchAll() {
   if (!gamesOK) {
     try {
       const r = await fetch('https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json', {cache:'no-store'});
-      if (r.ok) { processOpenfootball(await r.json()); setApiStatus('fallback'); }
+      if (r.ok) { const d = await r.json(); processOpenfootball(d); buildKnockout(d.matches || []); setApiStatus('fallback'); }
       else setApiStatus('err');
     } catch { setApiStatus('err'); }
   } else {
     setApiStatus('ok');
+    // Bracket KO : toujours depuis openfootball (worldcup26.ir ne fournit pas les KO).
+    try {
+      const r = await fetch('https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json', {cache:'no-store'});
+      if (r.ok) buildKnockout((await r.json()).matches || []);
+    } catch { /* non bloquant */ }
   }
 
   if (spin) spin.style.display = 'none';
@@ -518,6 +519,7 @@ async function fetchAll() {
   const active = document.querySelector('.section.active');
   if (active?.id === 'matchs') renderMatches();
   if (active?.id === 'stats')  renderStats();
+  if (active?.id === 'knockout') renderKnockout();
 
   scheduleNext();
 }
@@ -808,7 +810,53 @@ function processOpenfootball(data) {
   rebuildScorers();
 }
 
-// ─── RENDU GROUPES ────────────────────────────────────────────────────────────
+// ─── CONSTRUCTION DU BRACKET KO ───────────────────────────────────────────────
+// Lit les matchs à élimination (sans groupe) depuis openfootball et remplit koBracket.
+// Slots non résolus (3A/B/C…, 1I, 2H, W74, L101) affichés tels quels en attendant
+// que les équipes soient connues. Traduit les noms EN → FR via TEAM_FR si dispo.
+function buildKnockout(flat) {
+  const ko = flat.filter(m => {
+    const r = m.round || m.group || '';
+    return KO_ROUND_FR[r] !== undefined;
+  });
+  if (!ko.length) return;
+
+  const byRound = {};
+  ko.forEach(m => {
+    const r = m.round || m.group;
+    (byRound[r] = byRound[r] || []).push(m);
+  });
+
+  const trans = n => {
+    const s = typeof n === 'string' ? n : (n?.name || '');
+    return (typeof TEAM_FR !== 'undefined' && TEAM_FR[s]) ? TEAM_FR[s] : s;
+  };
+  // Une "vraie" équipe (vs un slot type 1A, 3C/D/F, W74)
+  const isTeam = s => s && !/^[0-9]?[A-L]?(\/[A-L])*$/.test(s) && !/^[WL]\d+$/.test(s) && !/^3[A-L/]+$/.test(s) && !/^[12][A-L]$/.test(s);
+
+  koBracket = KO_ROUND_ORDER
+    .filter(r => byRound[r])
+    .map(r => {
+      const ms = byRound[r].slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
+      const ds = ms.map(m => m.date).filter(Boolean).sort();
+      const fmt = d => { const [,mo,da] = d.split('-'); const M=['','janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'][+mo]; return `${+da} ${M}`; };
+      const dates = ds.length ? (ds[0]===ds[ds.length-1] ? fmt(ds[0]) : `${fmt(ds[0])}–${fmt(ds[ds.length-1])}`) : '';
+      return {
+        name: KO_ROUND_FR[r],
+        dates,
+        matches: ms.map(m => {
+          const h = trans(m.team1), a = trans(m.team2);
+          let hs = null, as = null;
+          if (m.score1 != null) { hs = +m.score1; as = +m.score2; }
+          else if (Array.isArray(m.score?.ft)) { hs = +m.score.ft[0]; as = +m.score.ft[1]; }
+          const md = m.date ? (()=>{ const [,mo,da]=m.date.split('-'); return `${+da} ${['','janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'][+mo]}`; })() : '';
+          return { h, a, hs, as, played: hs != null && !isNaN(hs), real: isTeam(h) && isTeam(a), date: md };
+        })
+      };
+    });
+}
+
+
 function renderGroups() {
   const grid = document.getElementById('groups-grid');
   if (!grid) return;
@@ -918,15 +966,29 @@ function renderMatches() {
 function renderKnockout() {
   const grid = document.getElementById('ko-grid');
   if (!grid) return;
-  grid.innerHTML = KO.map(round => `
+  if (!koBracket.length) {
+    grid.innerHTML = '<div class="no-data" style="grid-column:1/-1">Le tableau final apparaîtra dès la fin de la phase de groupes.</div>';
+    return;
+  }
+  const flag = name => (typeof F === 'function' ? F(name) : '');
+  const side = (label, real, score) => `
+    <div class="ko-team">
+      <span>${real ? flag(label) + ' ' : ''}${label}</span>
+      <span class="ko-score">${score != null && score !== '' ? score : '-'}</span>
+    </div>`;
+  grid.innerHTML = koBracket.map(round => `
     <div class="ko-round">
       <div class="ko-col-title">${round.name}</div>
-      ${round.matches.map(m => `
+      ${round.matches.map(m => {
+        const win = m.played && m.hs !== m.as;
+        const hw = win && m.hs > m.as, aw = win && m.as > m.hs;
+        return `
         <div class="ko-match">
-          <div class="ko-team"><span>${m.h}</span><span class="ko-score">-</span></div>
-          <div class="ko-team"><span>${m.a}</span><span class="ko-score">-</span></div>
-          <div class="ko-date">${round.dates}</div>
-        </div>`).join('')}
+          <div class="ko-team${hw ? ' ko-win' : ''}"><span>${m.real ? flag(m.h)+' ' : ''}${m.h}</span><span class="ko-score">${m.played ? m.hs : '-'}</span></div>
+          <div class="ko-team${aw ? ' ko-win' : ''}"><span>${m.real ? flag(m.a)+' ' : ''}${m.a}</span><span class="ko-score">${m.played ? m.as : '-'}</span></div>
+          <div class="ko-date">${m.date || round.dates}</div>
+        </div>`;
+      }).join('')}
     </div>`).join('');
 }
 
