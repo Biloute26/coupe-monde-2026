@@ -74,7 +74,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 /* Knockout */
 .ko-wrap{overflow-x:auto;padding-bottom:8px}
-.ko-grid{display:grid;grid-template-columns:repeat(5,190px);gap:12px;min-width:970px}
+.ko-grid{display:grid;grid-template-columns:repeat(5,minmax(180px,1fr));gap:12px;min-width:960px}
+.ko-round{min-width:0}
 .ko-col-title{font-size:11px;font-weight:700;color:#0A1628;text-align:center;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid #e0e3ea;text-transform:uppercase;letter-spacing:.5px}
 .ko-match{background:#fff;border:1px solid #e0e3ea;border-radius:8px;padding:7px 10px;margin-bottom:8px}
 .ko-team{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:11px;color:#444}
@@ -128,7 +129,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 @media(max-width:600px){
   .groups-grid{grid-template-columns:1fr}
   .wc-title{font-size:17px}
-  .ko-grid{grid-template-columns:repeat(5,148px)}
+  .ko-wrap{overflow-x:visible}
+  .ko-grid{grid-template-columns:1fr;min-width:0;gap:18px}
+  .ko-round{background:#f8f9fb;border:1px solid #e8eaf0;border-radius:10px;padding:10px}
 }
 </style>
 </head>
@@ -916,7 +919,7 @@ function renderKnockout() {
   const grid = document.getElementById('ko-grid');
   if (!grid) return;
   grid.innerHTML = KO.map(round => `
-    <div>
+    <div class="ko-round">
       <div class="ko-col-title">${round.name}</div>
       ${round.matches.map(m => `
         <div class="ko-match">
