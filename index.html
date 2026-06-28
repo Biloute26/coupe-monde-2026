@@ -329,6 +329,31 @@ const STATIC_MATCHES = [
 // Construit dynamiquement depuis les données de matchs (openfootball), pas codé en dur :
 // les équipes apparaissent dès qu'elles sont qualifiées, sinon on garde le slot (3A/B/C, W74…).
 let koBracket = [];
+// Round de 32 OFFICIEL (figé après la phase de groupes). Bracket fixe, sans redraw.
+// Ordre des paires = structure officielle du tableau (détermine les croisements en 8es).
+const R32 = [
+  ['South Africa','Canada','2026-06-28'],
+  ['Germany','Paraguay','2026-06-29'],
+  ['Brazil','Japan','2026-06-29'],
+  ['Netherlands','Morocco','2026-06-29'],
+  ['France','Sweden','2026-06-30'],
+  ['Ivory Coast','Norway','2026-06-30'],
+  ['Mexico','Ecuador','2026-06-30'],
+  ['England','DR Congo','2026-07-01'],
+  ['USA','Bosnia and Herzegovina','2026-07-01'],
+  ['Belgium','Senegal','2026-07-01'],
+  ['Spain','Austria','2026-07-02'],
+  ['Portugal','Croatia','2026-07-02'],
+  ['Switzerland','Algeria','2026-07-02'],
+  ['Australia','Egypt','2026-07-03'],
+  ['Argentina','Cape Verde','2026-07-03'],
+  ['Colombia','Ghana','2026-07-03'],
+];
+// Croisements officiels des 8es (index des paires R32 qui se rencontrent), d'après le tableau FIFA.
+const R16_PAIRS = [[0,3],[1,4],[2,5],[6,7],[10,11],[8,9],[13,15],[12,14]];
+const R16_DATES = ['2026-07-04','2026-07-04','2026-07-05','2026-07-05','2026-07-06','2026-07-06','2026-07-07','2026-07-07'];
+const QF_DATES = ['2026-07-09','2026-07-10','2026-07-11','2026-07-11'];
+const SF_DATES = ['2026-07-14','2026-07-15'];
 const KO_ROUND_FR = {
   'Round of 32':       '16es de finale',
   'Round of 16':       'Huitièmes',
@@ -811,50 +836,60 @@ function processOpenfootball(data) {
 }
 
 // ─── CONSTRUCTION DU BRACKET KO ───────────────────────────────────────────────
-// Lit les matchs à élimination (sans groupe) depuis openfootball et remplit koBracket.
-// Slots non résolus (3A/B/C…, 1I, 2H, W74, L101) affichés tels quels en attendant
-// que les équipes soient connues. Traduit les noms EN → FR via TEAM_FR si dispo.
+// Part du Round de 32 OFFICIEL (R32, figé). Récupère les scores réels depuis
+// openfootball, puis propage les vainqueurs vers 8es → quarts → demies → finale.
+const fmtKoDate = d => { if(!d) return ''; const [,mo,da]=d.split('-'); return `${+da} ${['','janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'][+mo]}`; };
+
 function buildKnockout(flat) {
-  const ko = flat.filter(m => {
-    const r = m.round || m.group || '';
-    return KO_ROUND_FR[r] !== undefined;
+  // Index des scores KO réels depuis openfootball : clé "equipeA|equipeB" (insensible).
+  const norm = s => (typeof s==='string'?s:'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
+  const koScores = {};
+  (flat||[]).forEach(m => {
+    const r = m.round || '';
+    if (!/Round of 32|Round of 16|Quarter|Semi|third place|Final/i.test(r)) return;
+    let hs=null, as=null;
+    if (m.score1!=null){hs=+m.score1;as=+m.score2;}
+    else if (Array.isArray(m.score?.ft)){hs=+m.score.ft[0];as=+m.score.ft[1];}
+    if (hs==null||isNaN(hs)) return;
+    const t1=norm(m.team1), t2=norm(m.team2);
+    koScores[t1+'|'+t2]={hs,as}; koScores[t2+'|'+t1]={hs:as,as:hs};
   });
-  if (!ko.length) return;
+  const lookScore = (h,a) => koScores[norm(h)+'|'+norm(a)] || null;
 
-  const byRound = {};
-  ko.forEach(m => {
-    const r = m.round || m.group;
-    (byRound[r] = byRound[r] || []).push(m);
-  });
-
-  const trans = n => {
-    const s = typeof n === 'string' ? n : (n?.name || '');
-    return (typeof TEAM_FR !== 'undefined' && TEAM_FR[s]) ? TEAM_FR[s] : s;
+  // Construit un match {h,a,date,hs,as,played,real,winner}
+  const mk = (h,a,date) => {
+    const real = !!h && !!a;
+    let hs=null, as=null;
+    if (real){ const s=lookScore(h,a); if(s){hs=s.hs;as=s.as;} }
+    const played = hs!=null;
+    const winner = played && hs!==as ? (hs>as?h:a) : null;
+    return {h:h||'À déterminer', a:a||'À déterminer', date:fmtKoDate(date), hs, as, played, real, winner};
   };
-  // Une "vraie" équipe (vs un slot type 1A, 3C/D/F, W74)
-  const isTeam = s => s && !/^[0-9]?[A-L]?(\/[A-L])*$/.test(s) && !/^[WL]\d+$/.test(s) && !/^3[A-L/]+$/.test(s) && !/^[12][A-L]$/.test(s);
 
-  koBracket = KO_ROUND_ORDER
-    .filter(r => byRound[r])
-    .map(r => {
-      const ms = byRound[r].slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
-      const ds = ms.map(m => m.date).filter(Boolean).sort();
-      const fmt = d => { const [,mo,da] = d.split('-'); const M=['','janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'][+mo]; return `${+da} ${M}`; };
-      const dates = ds.length ? (ds[0]===ds[ds.length-1] ? fmt(ds[0]) : `${fmt(ds[0])}–${fmt(ds[ds.length-1])}`) : '';
-      return {
-        name: KO_ROUND_FR[r],
-        dates,
-        matches: ms.map(m => {
-          const h = trans(m.team1), a = trans(m.team2);
-          let hs = null, as = null;
-          if (m.score1 != null) { hs = +m.score1; as = +m.score2; }
-          else if (Array.isArray(m.score?.ft)) { hs = +m.score.ft[0]; as = +m.score.ft[1]; }
-          const md = m.date ? (()=>{ const [,mo,da]=m.date.split('-'); return `${+da} ${['','janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'][+mo]}`; })() : '';
-          return { h, a, hs, as, played: hs != null && !isNaN(hs), real: isTeam(h) && isTeam(a), date: md };
-        })
-      };
-    });
+  // 16es
+  const r32 = R32.map(([h,a,d]) => mk(h,a,d));
+  // 8es : vainqueurs des paires officielles
+  const r16 = R16_PAIRS.map(([i,j],k) => mk(r32[i].winner, r32[j].winner, R16_DATES[k]));
+  // Quarts : 8es consécutifs 2 à 2
+  const qf = [0,2,4,6].map((i,k) => mk(r16[i].winner, r16[i+1].winner, QF_DATES[k]));
+  // Demies
+  const sf = [0,2].map((i,k) => mk(qf[i].winner, qf[i+1].winner, SF_DATES[k]));
+  // Petite finale (perdants des demies) + Finale (vainqueurs)
+  const loser = m => m.played && m.winner ? (m.winner===m.h?m.a:m.h) : null;
+  const third = mk(loser(sf[0]), loser(sf[1]), '2026-07-18');
+  const final = mk(sf[0].winner, sf[1].winner, '2026-07-19');
+
+  koBracket = [
+    {name:'16es de finale', matches:r32},
+    {name:'Huitièmes',      matches:r16},
+    {name:'Quarts',         matches:qf},
+    {name:'Demies',         matches:sf},
+    {name:'Petite finale',  matches:[third]},
+    {name:'🏆 Finale',      matches:[final]},
+  ];
 }
+
+
 
 
 function renderGroups() {
@@ -986,7 +1021,7 @@ function renderKnockout() {
         <div class="ko-match">
           <div class="ko-team${hw ? ' ko-win' : ''}"><span>${m.real ? flag(m.h)+' ' : ''}${m.h}</span><span class="ko-score">${m.played ? m.hs : '-'}</span></div>
           <div class="ko-team${aw ? ' ko-win' : ''}"><span>${m.real ? flag(m.a)+' ' : ''}${m.a}</span><span class="ko-score">${m.played ? m.as : '-'}</span></div>
-          <div class="ko-date">${m.date || round.dates}</div>
+          <div class="ko-date">${m.date || ''}</div>
         </div>`;
       }).join('')}
     </div>`).join('');
